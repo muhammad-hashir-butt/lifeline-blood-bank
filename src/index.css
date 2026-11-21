@@ -1,0 +1,10 @@
+@import "tailwindcss";
+
+@theme {
+  --color-crimson: #c5364b;
+  --color-crimson-dark: #a8293c;
+  --color-crimson-soft: #fdf2f4;
+  --color-emerald-brand: #16866d;
+  --color-amber-brand: #b7791f;
+  --color-indigo-brand: #6f6bb2;
+}
