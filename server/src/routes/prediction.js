@@ -4,28 +4,21 @@ const Inventory = require("../models/Inventory");
 const Request = require("../models/Request");
 const { authenticate, authorize } = require("../middleware/auth");
 const { serializeDoc, serializeMany } = require("../utils/serialize");
+const { inventoryReadFilter, requestReadFilter } = require("../utils/rbac");
 
 const router = express.Router();
 
-router.get("/", authenticate, async (req, res) => {
+router.get("/", authenticate, authorize("admin", "hospital", "ngo"), async (req, res) => {
   try {
-    let inventoryFilter = {};
-    let requestFilter = { status: "pending" };
-
-    if (req.user.role === "hospital") {
-      inventoryFilter = {
-        $or: [{ created_by: req.user.id }, { hospital_name: req.user.full_name }],
-      };
-      requestFilter = { ...requestFilter, $or: [{ created_by: req.user.id }, { city: req.user.city }] };
-    } else if (req.user.role === "ngo" || req.user.role === "donor") {
-      inventoryFilter = { city: req.user.city };
-      requestFilter = { ...requestFilter, city: req.user.city };
-    }
+    const pendingFilter = {
+      ...requestReadFilter(req.user),
+      status: "pending",
+    };
 
     const [demandRows, inventory, requests] = await Promise.all([
       MonthlyDemand.find({}).sort({ month_order: 1 }),
-      Inventory.find(inventoryFilter),
-      Request.find(requestFilter),
+      Inventory.find(inventoryReadFilter(req.user)),
+      Request.find(pendingFilter),
     ]);
 
     res.json({

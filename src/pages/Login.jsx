@@ -115,6 +115,14 @@ export default function Login() {
               Create an account
             </Link>
           </p>
+
+          <div className="mt-5 pt-4 border-t border-slate-100 text-[11px] text-slate-500 space-y-1">
+            <div className="font-semibold text-slate-600">Demo accounts</div>
+            <div>Admin — admin@lifeline.com / admin123</div>
+            <div>Donor — donor@lifeline.com / donor123</div>
+            <div>Hospital — hospital@lifeline.com / hospital123</div>
+            <div>NGO — ngo@lifeline.com / ngo123</div>
+          </div>
         </form>
         <div className="text-xs text-slate-400 mt-6">© 2026 Lifeline Blood Services</div>
       </main>
