@@ -16,13 +16,19 @@ try {
 
 const connectDB = require("../server/src/config/db");
 const { createApp } = require("../server/src/app");
+const { ensureSeedUsers } = require("../server/src/scripts/bootstrap");
 
 const app = createApp();
 
-let dbReady;
-function ensureDb() {
-  if (!dbReady) dbReady = connectDB();
-  return dbReady;
+let ready;
+async function ensureReady() {
+  if (!ready) {
+    ready = (async () => {
+      await connectDB();
+      await ensureSeedUsers();
+    })();
+  }
+  return ready;
 }
 
 function restoreApiPath(req) {
@@ -37,7 +43,6 @@ function restoreApiPath(req) {
     req.url = original.split("?")[0] + (req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "");
   }
 
-  // Fallback: use x-match-path / raw url if provided
   if (!String(req.url || "").startsWith("/api/") && req.headers["x-match-path"]) {
     req.url = req.headers["x-match-path"];
   }
@@ -45,7 +50,7 @@ function restoreApiPath(req) {
 
 export default async function handler(req, res) {
   try {
-    await ensureDb();
+    await ensureReady();
   } catch (err) {
     console.error("DB connection failed:", err);
     res.statusCode = 500;
