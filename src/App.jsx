@@ -24,17 +24,26 @@ function Layout({ children }) {
   );
 }
 
+function AuthLoading() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-50 text-sm text-slate-500">
+      Loading Lifeline portal...
+    </div>
+  );
+}
+
 function ProtectedRoute({ children }) {
   const { user, loading } = useAuth();
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-sm text-slate-500">
-        Loading Lifeline portal...
-      </div>
-    );
-  }
+  if (loading) return <AuthLoading />;
   if (!user) return <Navigate to="/" replace />;
   return <Layout>{children}</Layout>;
+}
+
+function PublicOnlyRoute({ children }) {
+  const { user, loading } = useAuth();
+  if (loading) return <AuthLoading />;
+  if (user) return <Navigate to="/dashboard" replace />;
+  return children;
 }
 
 export default function App() {
@@ -42,8 +51,8 @@ export default function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/register" element={<Register />} />
+          <Route path="/" element={<PublicOnlyRoute><Login /></PublicOnlyRoute>} />
+          <Route path="/register" element={<PublicOnlyRoute><Register /></PublicOnlyRoute>} />
           <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
           <Route path="/inventory" element={<ProtectedRoute><Inventory /></ProtectedRoute>} />
           <Route path="/donors" element={<ProtectedRoute><Donors /></ProtectedRoute>} />

@@ -1,16 +1,81 @@
-# React + Vite
+# Lifeline Blood Bank
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Blood bank operations portal with role-based access for **Admin**, **Hospital**, **NGO**, and **Donor**.
 
-Currently, two official plugins are available:
+Stack:
+- **Frontend:** React + Vite + Tailwind + Poppins
+- **Backend:** Node.js + Express + MongoDB
+- **Auth:** JWT
+- **Alerts:** Nodemailer (email)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+> Supabase (hobby) client is commented out and replaced by the custom API.
 
-## React Compiler
+## Roles
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+| Role | Sees | Can do |
+|------|------|--------|
+| Admin | Everything | Full CRUD, alerts, forecast |
+| Hospital | Nationwide inventory (view), city donors | Manage own hospital stock, requests, alerts |
+| NGO | City inventory + donors | Manage city stock/requests/alerts |
+| Donor | Nationwide inventory (view), own profile | View only (no stock/request create) |
 
-## Expanding the Oxlint configuration
+## Quick start
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+### 1) Backend
+
+```bash
+cd server
+cp .env.example .env
+# fill MONGODB_URI, JWT_SECRET, SMTP_*
+yarn install
+yarn seed:users
+yarn dev
+```
+
+API runs at `http://localhost:5000`.
+
+### 2) Frontend
+
+```bash
+# from project root
+cp .env.example .env   # optional; defaults to localhost:5000
+npm install
+npm run dev
+```
+
+App runs at `http://localhost:5173`.
+
+## Seed logins
+
+| Role | Email | Password |
+|------|-------|----------|
+| Admin | `admin@lifeline.com` | `admin123` |
+| Donor | `donor@lifeline.com` | `donor123` |
+| Hospital | `hospital@lifeline.com` | `hospital123` |
+| NGO | `ngo@lifeline.com` | `ngo123` |
+
+## Useful scripts
+
+```bash
+# frontend
+npm run dev
+npm run build
+
+# backend
+cd server
+yarn dev
+yarn seed:users
+yarn seed:admin
+```
+
+## Environment
+
+**Frontend (`.env`)**
+- `VITE_API_URL` — default `http://localhost:5000/api`
+
+**Backend (`server/.env`)**
+- `MONGODB_URI`
+- `JWT_SECRET`
+- `JWT_EXPIRES_IN`
+- `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`
+- `EMAIL_FROM`
