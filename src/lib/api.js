@@ -1,4 +1,7 @@
-const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000/api";
+// Local: hit Express on :5000. Production (Vercel): same-origin /api (no CORS).
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.PROD ? "/api" : "http://localhost:5000/api");
 
 function getToken() {
   return localStorage.getItem("lifeline_token");

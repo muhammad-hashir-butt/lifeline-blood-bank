@@ -71,11 +71,23 @@ yarn seed:admin
 ## Environment
 
 **Frontend (`.env`)**
-- `VITE_API_URL` — default `http://localhost:5000/api`
+- Local: leave `VITE_API_URL` unset (defaults to `http://localhost:5000/api`)
+- Vercel: leave `VITE_API_URL` **unset** so the app uses same-origin `/api` (fixes CORS)
 
-**Backend (`server/.env`)**
-- `MONGODB_URI`
+**Backend (`server/.env` locally / Vercel Project Env for production)**
+- `MONGODB_URI` — **required on Vercel** (use MongoDB Atlas, not localhost)
 - `JWT_SECRET`
 - `JWT_EXPIRES_IN`
+- `CLIENT_ORIGINS` — optional; Vercel app origins are allowed by default
 - `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS`
 - `EMAIL_FROM`
+
+### Vercel deploy notes
+1. Push this repo and redeploy
+2. In Vercel → Project → Settings → Environment Variables, add at least:
+   - `MONGODB_URI` (Atlas connection string with DB name)
+   - `JWT_SECRET`
+   - SMTP vars if you want real emails
+3. Do **not** set `VITE_API_URL` to localhost on Vercel
+4. Redeploy after saving env vars
+5. Run seed once against Atlas (local machine with Atlas URI): `cd server && yarn seed:users`
