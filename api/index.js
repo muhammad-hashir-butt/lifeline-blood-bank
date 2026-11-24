@@ -8,10 +8,13 @@ import { fileURLToPath } from "url";
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-try {
-  require("dotenv").config({ path: path.join(__dirname, "../server/.env") });
-} catch {
-  // Vercel uses dashboard env vars
+// Never load local server/.env on Vercel — it often points to 127.0.0.1 and breaks production.
+if (!process.env.VERCEL) {
+  try {
+    require("dotenv").config({ path: path.join(__dirname, "../server/.env") });
+  } catch {
+    // ignore
+  }
 }
 
 const connectDB = require("../server/src/config/db");
