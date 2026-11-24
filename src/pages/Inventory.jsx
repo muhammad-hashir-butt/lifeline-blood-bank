@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Plus, Trash2, Search, AlertTriangle, ShieldAlert } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { inventoryApi } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import BloodGroupBadge from "../components/BloodGroupBadge";
 
@@ -8,7 +8,7 @@ const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 const CITIES = ["Lahore", "Karachi", "Islamabad", "Rawalpindi", "Multan", "Faisalabad", "Peshawar"];
 
 export default function Inventory() {
-  const { profile, user } = useAuth();
+  const { profile } = useAuth();
   const role = profile?.role || "donor";
   const canEdit = ["admin", "hospital", "ngo"].includes(role);
 
@@ -19,19 +19,21 @@ export default function Inventory() {
   const [form, setForm] = useState({
     blood_group: "A+",
     units: "",
-    hospital_name: "",
-    city: "Lahore",
+    hospital_name: profile?.role === "hospital" ? profile?.full_name || "" : "",
+    city: profile?.city || "Lahore",
     expiry_date: "",
   });
 
   async function fetchInventory() {
     setLoading(true);
-    const { data } = await supabase
-      .from("inventory")
-      .select("*")
-      .order("units", { ascending: true });
-    if (data) setItems(data);
-    setLoading(false);
+    try {
+      const data = await inventoryApi.list();
+      setItems(data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -44,35 +46,45 @@ export default function Inventory() {
       alert("Please fill hospital name, units, and expiry date.");
       return;
     }
-    const { error } = await supabase.from("inventory").insert({
-      blood_group: form.blood_group,
-      units: Number(form.units),
-      hospital_name: form.hospital_name,
-      city: form.city,
-      expiry_date: form.expiry_date,
-      created_by: user?.id,
-    });
-    if (error) {
-      alert(error.message);
-      return;
+    try {
+      await inventoryApi.create({
+        blood_group: form.blood_group,
+        units: Number(form.units),
+        hospital_name: form.hospital_name,
+        city: form.city,
+        expiry_date: form.expiry_date,
+      });
+      setForm({
+        blood_group: "A+",
+        units: "",
+        hospital_name: role === "hospital" ? profile?.full_name || "" : "",
+        city: profile?.city || "Lahore",
+        expiry_date: "",
+      });
+      fetchInventory();
+    } catch (err) {
+      alert(err.message);
     }
-    setForm({ blood_group: "A+", units: "", hospital_name: "", city: "Lahore", expiry_date: "" });
-    fetchInventory();
   };
 
   const updateUnits = async (id, newUnits) => {
     if (newUnits < 0) return;
-    await supabase
-      .from("inventory")
-      .update({ units: newUnits, updated_at: new Date().toISOString() })
-      .eq("id", id);
-    fetchInventory();
+    try {
+      await inventoryApi.update(id, { units: newUnits });
+      fetchInventory();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const deleteItem = async (id) => {
     if (!confirm("Delete this inventory record?")) return;
-    await supabase.from("inventory").delete().eq("id", id);
-    fetchInventory();
+    try {
+      await inventoryApi.remove(id);
+      fetchInventory();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const getExpiryBadge = (expiryDate) => {
@@ -103,8 +115,18 @@ export default function Inventory() {
         <div className="p-4 rounded-2xl bg-amber-50 border border-amber-brand/20 text-amber-brand text-xs flex items-center gap-3">
           <ShieldAlert className="w-5 h-5 shrink-0" />
           <span>
-            <strong>View-Only Mode (Donor Role):</strong> Only <strong>Hospital, NGO, or Admin</strong> accounts can add or edit stock. Register a Hospital or Admin account to test full inventory management.
+            <strong>View-Only Mode (Donor Role):</strong> You can see nationwide stock. Only <strong>Hospital, NGO, or Admin</strong> can add or edit units.
           </span>
+        </div>
+      )}
+      {canEdit && role === "hospital" && (
+        <div className="p-4 rounded-2xl bg-indigo-50 border border-indigo-brand/20 text-indigo-brand text-xs">
+          Hospital scope: you can view all network stock, but edit/delete only stock belonging to <strong>{profile?.full_name}</strong>.
+        </div>
+      )}
+      {canEdit && role === "ngo" && (
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-brand/20 text-amber-brand text-xs">
+          NGO scope: you can manage stock only in <strong>{profile?.city}</strong>.
         </div>
       )}
 

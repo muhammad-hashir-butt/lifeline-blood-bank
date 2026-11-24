@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Droplets, Users, Siren, AlertTriangle } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { dashboardApi } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import StatCard from "../components/StatCard";
 import BloodGroupBadge from "../components/BloodGroupBadge";
@@ -21,15 +21,16 @@ export default function Dashboard() {
 
   useEffect(() => {
     async function loadOverview() {
-      const [invRes, donorRes, reqRes] = await Promise.all([
-        supabase.from("inventory").select("*").order("units", { ascending: true }),
-        supabase.from("donors").select("id", { count: "exact", head: true }),
-        supabase.from("requests").select("*").order("created_at", { ascending: false }).limit(5),
-      ]);
-      if (invRes.data) setInventory(invRes.data);
-      if (typeof donorRes.count === "number") setDonorsCount(donorRes.count);
-      if (reqRes.data) setRequests(reqRes.data);
-      setLoading(false);
+      try {
+        const data = await dashboardApi.get();
+        setInventory(data.inventory || []);
+        setDonorsCount(data.donorsCount || 0);
+        setRequests(data.requests || []);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoading(false);
+      }
     }
     loadOverview();
   }, []);
@@ -37,6 +38,7 @@ export default function Dashboard() {
   const totalUnits = inventory.reduce((sum, item) => sum + item.units, 0);
   const pendingCount = requests.filter((r) => r.status === "pending").length;
   const lowStockCount = inventory.filter((i) => i.units <= 5).length;
+  const role = profile?.role || "donor";
 
   return (
     <div className="space-y-6">
@@ -48,17 +50,23 @@ export default function Dashboard() {
           <h1 className="text-2xl font-bold text-slate-900 mt-0.5">
             Welcome, {profile?.full_name || "Team"}
           </h1>
-          <p className="text-sm text-slate-500">Live status of blood stock, donors, and emergency requests.</p>
+          <p className="text-sm text-slate-500">
+            {role === "admin"
+              ? "Full system view of blood stock, donors, and emergency requests."
+              : role === "donor"
+              ? "Your city stock snapshot and nearby emergency activity."
+              : "Live status of blood stock, donors, and emergency requests for your account."}
+          </p>
         </div>
         <div className="inline-flex items-center gap-2 text-xs font-medium text-emerald-brand bg-emerald-50 border border-emerald-brand/20 px-3 py-1.5 rounded-full self-start">
           <span className="w-2 h-2 rounded-full bg-emerald-brand animate-pulse" />
-          Live Supabase Sync
+          Live MongoDB Sync
         </div>
       </div>
 
       <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-4">
-        <StatCard title="Available Units" value={totalUnits} note="Across all hospitals" icon={Droplets} accent="crimson" />
-        <StatCard title="Registered Donors" value={donorsCount} note="Active donor directory" icon={Users} accent="emerald" />
+        <StatCard title="Available Units" value={totalUnits} note={role === "admin" ? "Across all hospitals" : "In your scope"} icon={Droplets} accent="crimson" />
+        <StatCard title="Registered Donors" value={donorsCount} note={role === "donor" ? "Your donor profile" : "Active donor directory"} icon={Users} accent="emerald" />
         <StatCard title="Pending Requests" value={pendingCount} note="Awaiting fulfillment" icon={Siren} accent="amber" />
         <StatCard title="Low Stock Alerts" value={lowStockCount} note="5 units or below" icon={AlertTriangle} accent="indigo" />
       </div>
@@ -85,7 +93,9 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {inventory.map((item) => (
+                  {inventory.length === 0 ? (
+                    <tr><td colSpan="4" className="px-5 py-8 text-center text-slate-400">No inventory yet. Start by adding stock.</td></tr>
+                  ) : inventory.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3"><BloodGroupBadge group={item.blood_group} /></td>
                       <td className="px-5 py-3 font-semibold text-slate-800">{item.units} units</td>
@@ -114,7 +124,9 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {requests.map((req) => (
+                  {requests.length === 0 ? (
+                    <tr><td colSpan="4" className="px-5 py-8 text-center text-slate-400">No requests yet.</td></tr>
+                  ) : requests.map((req) => (
                     <tr key={req.id} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3 font-medium text-slate-800">{req.hospital_name}</td>
                       <td className="px-5 py-3"><BloodGroupBadge group={req.blood_group} /></td>

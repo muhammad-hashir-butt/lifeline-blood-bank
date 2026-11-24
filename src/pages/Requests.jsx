@@ -1,19 +1,11 @@
 import React, { useEffect, useState } from "react";
-import { Siren, Sparkles, CheckCircle2, MapPin, Send, X, Building2 } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { Siren, Sparkles, CheckCircle2, MapPin, Send, X, Building2, ShieldAlert } from "lucide-react";
+import { requestsApi } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import BloodGroupBadge from "../components/BloodGroupBadge";
 
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
-const CITY_COORDS = {
-  Lahore: { lat: 31.5204, lng: 74.3587 },
-  Karachi: { lat: 24.8607, lng: 67.0011 },
-  Islamabad: { lat: 33.6844, lng: 73.0479 },
-  Rawalpindi: { lat: 33.5651, lng: 73.0169 },
-  Multan: { lat: 30.1575, lng: 71.5249 },
-  Faisalabad: { lat: 31.4504, lng: 73.135 },
-  Peshawar: { lat: 34.0151, lng: 71.5249 },
-};
+const CITIES = ["Lahore", "Karachi", "Islamabad", "Rawalpindi", "Multan", "Faisalabad", "Peshawar"];
 
 const urgencyStyles = {
   low: "bg-slate-100 text-slate-600 border-slate-200",
@@ -29,32 +21,16 @@ const statusStyles = {
   cancelled: "bg-slate-100 text-slate-500 border-slate-200",
 };
 
-function distanceKm(lat1, lon1, lat2, lon2) {
-  if (!lat1 || !lon1 || !lat2 || !lon2) return 999;
-  const R = 6371;
-  const dLat = ((lat2 - lat1) * Math.PI) / 180;
-  const dLon = ((lon2 - lon1) * Math.PI) / 180;
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
-  return Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
-}
-
-function isEligible(lastDate) {
-  if (!lastDate) return true;
-  const days = Math.floor((Date.now() - new Date(lastDate).getTime()) / (1000 * 60 * 60 * 24));
-  return days >= 90;
-}
-
 export default function Requests() {
-  const { user } = useAuth();
+  const { profile } = useAuth();
+  const role = profile?.role || "donor";
+  const canManage = ["admin", "hospital", "ngo"].includes(role);
+
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState({
-    hospital_name: "",
-    city: "Lahore",
+    hospital_name: role === "hospital" ? profile?.full_name || "" : "",
+    city: profile?.city || "Lahore",
     blood_group: "O-",
     units: "",
     urgency: "high",
@@ -67,12 +43,14 @@ export default function Requests() {
 
   async function fetchRequests() {
     setLoading(true);
-    const { data } = await supabase
-      .from("requests")
-      .select("*")
-      .order("created_at", { ascending: false });
-    if (data) setRequests(data);
-    setLoading(false);
+    try {
+      const data = await requestsApi.list();
+      setRequests(data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -85,102 +63,71 @@ export default function Requests() {
       alert("Please enter hospital name and units needed.");
       return;
     }
-    const { error } = await supabase.from("requests").insert({
-      hospital_name: form.hospital_name,
-      city: form.city,
-      blood_group: form.blood_group,
-      units: Number(form.units),
-      urgency: form.urgency,
-      status: "pending",
-      created_by: user?.id,
-    });
-    if (error) {
-      alert(error.message);
-      return;
+    try {
+      await requestsApi.create({
+        hospital_name: form.hospital_name,
+        city: form.city,
+        blood_group: form.blood_group,
+        units: Number(form.units),
+        urgency: form.urgency,
+      });
+      setForm({
+        hospital_name: role === "hospital" ? profile?.full_name || "" : "",
+        city: profile?.city || "Lahore",
+        blood_group: "O-",
+        units: "",
+        urgency: "high",
+      });
+      fetchRequests();
+    } catch (err) {
+      alert(err.message);
     }
-    setForm({ hospital_name: "", city: "Lahore", blood_group: "O-", units: "", urgency: "high" });
-    fetchRequests();
   };
 
   const openSmartMatch = async (req) => {
     setMatchModal(req);
-    const reqCoords = CITY_COORDS[req.city] || CITY_COORDS.Lahore;
-
-    const [invRes, donorRes] = await Promise.all([
-      supabase.from("inventory").select("*").gt("units", 0),
-      supabase.from("donors").select("*"),
-    ]);
-
-    const stocks = (invRes.data || [])
-      .filter((i) => i.blood_group === req.blood_group || i.blood_group === "O-")
-      .sort((a, b) => (a.city === req.city ? -1 : b.city === req.city ? 1 : b.units - a.units));
-
-    const donors = (donorRes.data || [])
-      .filter((d) => isEligible(d.last_donation_date) && (d.blood_group === req.blood_group || d.blood_group === "O-"))
-      .map((d) => {
-        const dCoords = d.latitude && d.longitude ? { lat: d.latitude, lng: d.longitude } : CITY_COORDS[d.city] || CITY_COORDS.Lahore;
-        return {
-          ...d,
-          distance: distanceKm(reqCoords.lat, reqCoords.lng, dCoords.lat, dCoords.lng),
-        };
-      })
-      .sort((a, b) => a.distance - b.distance);
-
-    setMatchedStock(stocks);
-    setMatchedDonors(donors);
+    try {
+      const data = await requestsApi.match(req.id);
+      setMatchedStock(data.matchedStock || []);
+      setMatchedDonors(data.matchedDonors || []);
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const matchWithStock = async (stock) => {
     if (!matchModal) return;
-    await supabase
-      .from("requests")
-      .update({
-        status: "matched",
-        matched_source: `${stock.hospital_name} (${stock.city})`,
-      })
-      .eq("id", matchModal.id);
-
-    const remaining = Math.max(0, stock.units - matchModal.units);
-    await supabase.from("inventory").update({ units: remaining }).eq("id", stock.id);
-
-    setMatchModal(null);
-    fetchRequests();
+    try {
+      await requestsApi.allocate(matchModal.id, stock.id);
+      setMatchModal(null);
+      fetchRequests();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const sendAlertsToDonors = async () => {
     if (!matchModal || matchedDonors.length === 0) return;
     setSendingAlert(true);
-
-    const topDonors = matchedDonors.slice(0, 5);
-    const alertRows = topDonors.map((d) => ({
-      request_id: matchModal.id,
-      recipient_name: d.name,
-      recipient_phone: d.phone,
-      city: d.city,
-      blood_group: matchModal.blood_group,
-      message: `URGENT: ${matchModal.hospital_name} (${matchModal.city}) needs ${matchModal.units} unit(s) of ${matchModal.blood_group} blood (${d.distance} km away).`,
-      channel: "SMS",
-      status: "sent",
-    }));
-
-    await supabase.from("alerts").insert(alertRows);
-    await supabase
-      .from("requests")
-      .update({
-        status: "matched",
-        matched_source: `SMS Alerted ${topDonors.length} nearby donor(s)`,
-      })
-      .eq("id", matchModal.id);
-
-    setSendingAlert(false);
-    setMatchModal(null);
-    fetchRequests();
-    alert(`SMS alerts sent and logged for ${topDonors.length} eligible donor(s)!`);
+    try {
+      const data = await requestsApi.alertDonors(matchModal.id);
+      setMatchModal(null);
+      fetchRequests();
+      alert(`Email alerts sent and logged for ${data.count} eligible donor(s)!`);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setSendingAlert(false);
+    }
   };
 
   const markFulfilled = async (id) => {
-    await supabase.from("requests").update({ status: "fulfilled" }).eq("id", id);
-    fetchRequests();
+    try {
+      await requestsApi.update(id, { status: "fulfilled" });
+      fetchRequests();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   return (
@@ -188,60 +135,69 @@ export default function Requests() {
       <div>
         <div className="text-xs font-semibold uppercase tracking-wider text-crimson">Emergency Coordination</div>
         <h1 className="text-2xl font-bold text-slate-900 mt-0.5">Emergency Blood Requests</h1>
-        <p className="text-sm text-slate-500">Create urgent requests, run smart stock/location matching, and dispatch SMS alerts.</p>
+        <p className="text-sm text-slate-500">Create urgent requests, run smart stock/location matching, and dispatch email alerts.</p>
       </div>
 
-      <form onSubmit={createRequest} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
-        <h2 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
-          <Siren className="w-4 h-4 text-crimson" /> Create Emergency Request
-        </h2>
-        <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
-          <input
-            placeholder="Requesting Hospital Name"
-            value={form.hospital_name}
-            onChange={(e) => setForm({ ...form, hospital_name: e.target.value })}
-            className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
-          />
-          <select
-            value={form.city}
-            onChange={(e) => setForm({ ...form, city: e.target.value })}
-            className="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white"
-          >
-            {Object.keys(CITY_COORDS).map((c) => <option key={c}>{c}</option>)}
-          </select>
-          <select
-            value={form.blood_group}
-            onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
-            className="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white"
-          >
-            {BLOOD_GROUPS.map((g) => <option key={g}>{g}</option>)}
-          </select>
-          <input
-            type="number"
-            min="1"
-            placeholder="Units Needed"
-            value={form.units}
-            onChange={(e) => setForm({ ...form, units: e.target.value })}
-            className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
-          />
-          <select
-            value={form.urgency}
-            onChange={(e) => setForm({ ...form, urgency: e.target.value })}
-            className="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white"
-          >
-            <option value="low">Low Urgency</option>
-            <option value="medium">Medium Urgency</option>
-            <option value="high">High Urgency</option>
-            <option value="critical">Critical</option>
-          </select>
+      {!canManage && (
+        <div className="p-4 rounded-2xl bg-amber-50 border border-amber-brand/20 text-amber-brand text-xs flex items-center gap-3">
+          <ShieldAlert className="w-5 h-5 shrink-0" />
+          <span>Donor accounts can view city requests. Hospital, NGO, or Admin can create and match requests.</span>
         </div>
-        <button
-          type="submit"
-          className="mt-3 bg-crimson hover:bg-crimson-dark text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer transition-colors"
-        >
-          + Submit Request
-        </button>
-      </form>
+      )}
+
+      {canManage && (
+        <form onSubmit={createRequest} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs">
+          <h2 className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+            <Siren className="w-4 h-4 text-crimson" /> Create Emergency Request
+          </h2>
+          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+            <input
+              placeholder="Requesting Hospital Name"
+              value={form.hospital_name}
+              onChange={(e) => setForm({ ...form, hospital_name: e.target.value })}
+              className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
+            />
+            <select
+              value={form.city}
+              onChange={(e) => setForm({ ...form, city: e.target.value })}
+              className="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white"
+            >
+              {CITIES.map((c) => <option key={c}>{c}</option>)}
+            </select>
+            <select
+              value={form.blood_group}
+              onChange={(e) => setForm({ ...form, blood_group: e.target.value })}
+              className="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white"
+            >
+              {BLOOD_GROUPS.map((g) => <option key={g}>{g}</option>)}
+            </select>
+            <input
+              type="number"
+              min="1"
+              placeholder="Units Needed"
+              value={form.units}
+              onChange={(e) => setForm({ ...form, units: e.target.value })}
+              className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
+            />
+            <select
+              value={form.urgency}
+              onChange={(e) => setForm({ ...form, urgency: e.target.value })}
+              className="px-3 py-2 rounded-xl border border-slate-300 text-sm bg-white"
+            >
+              <option value="low">Low Urgency</option>
+              <option value="medium">Medium Urgency</option>
+              <option value="high">High Urgency</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            className="mt-3 bg-crimson hover:bg-crimson-dark text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer transition-colors"
+          >
+            + Submit Request
+          </button>
+        </form>
+      )}
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
         <div className="overflow-x-auto">
@@ -254,12 +210,14 @@ export default function Requests() {
                 <th className="px-5 py-3">Urgency</th>
                 <th className="px-5 py-3">Status</th>
                 <th className="px-5 py-3">Matched Source</th>
-                <th className="px-5 py-3 text-right">Actions</th>
+                {canManage && <th className="px-5 py-3 text-right">Actions</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan="7" className="px-5 py-8 text-center text-slate-400">Loading requests...</td></tr>
+              ) : requests.length === 0 ? (
+                <tr><td colSpan="7" className="px-5 py-8 text-center text-slate-400">No requests yet.</td></tr>
               ) : requests.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/70">
                   <td className="px-5 py-3.5">
@@ -281,24 +239,26 @@ export default function Requests() {
                     </span>
                   </td>
                   <td className="px-5 py-3.5 text-xs text-slate-600">{r.matched_source || "Not matched yet"}</td>
-                  <td className="px-5 py-3.5 text-right space-x-2 whitespace-nowrap">
-                    {r.status === "pending" && (
-                      <button
-                        onClick={() => openSmartMatch(r)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-crimson text-white hover:bg-crimson-dark cursor-pointer"
-                      >
-                        <Sparkles className="w-3.5 h-3.5" /> Smart Match
-                      </button>
-                    )}
-                    {r.status === "matched" && (
-                      <button
-                        onClick={() => markFulfilled(r.id)}
-                        className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-brand border border-emerald-brand/20 hover:bg-emerald-brand hover:text-white cursor-pointer"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" /> Mark Fulfilled
-                      </button>
-                    )}
-                  </td>
+                  {canManage && (
+                    <td className="px-5 py-3.5 text-right space-x-2 whitespace-nowrap">
+                      {r.status === "pending" && (
+                        <button
+                          onClick={() => openSmartMatch(r)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-crimson text-white hover:bg-crimson-dark cursor-pointer"
+                        >
+                          <Sparkles className="w-3.5 h-3.5" /> Smart Match
+                        </button>
+                      )}
+                      {r.status === "matched" && (
+                        <button
+                          onClick={() => markFulfilled(r.id)}
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-50 text-emerald-brand border border-emerald-brand/20 hover:bg-emerald-brand hover:text-white cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Mark Fulfilled
+                        </button>
+                      )}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -362,7 +322,7 @@ export default function Requests() {
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-crimson hover:bg-crimson-dark text-white text-xs font-semibold cursor-pointer"
                   >
                     <Send className="w-3.5 h-3.5" />
-                    {sendingAlert ? "Sending..." : "Send SMS Alerts"}
+                    {sendingAlert ? "Sending..." : "Send Email Alerts"}
                   </button>
                 )}
               </div>
@@ -376,7 +336,7 @@ export default function Requests() {
                         <BloodGroupBadge group={d.blood_group} />
                         <div>
                           <div className="text-sm font-semibold text-slate-800">{d.name}</div>
-                          <div className="text-xs text-slate-500">{d.city} • {d.phone}</div>
+                          <div className="text-xs text-slate-500">{d.city} • {d.email || d.phone}</div>
                         </div>
                       </div>
                       <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-brand border border-emerald-brand/20">
