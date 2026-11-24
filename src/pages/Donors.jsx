@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Search, UserPlus, History, Droplet, MapPin, Phone, X } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { Search, UserPlus, History, Droplet, MapPin, Phone, X, Mail, Trash2 } from "lucide-react";
+import { donorsApi } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import BloodGroupBadge from "../components/BloodGroupBadge";
 
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
@@ -21,6 +22,10 @@ function getEligibility(lastDate) {
 }
 
 export default function Donors() {
+  const { profile } = useAuth();
+  const role = profile?.role || "donor";
+  const canManage = ["admin", "hospital", "ngo"].includes(role);
+
   const [donors, setDonors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -28,6 +33,7 @@ export default function Donors() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({
     name: "",
+    email: "",
     blood_group: "O+",
     phone: "",
     city: "Lahore",
@@ -39,9 +45,14 @@ export default function Donors() {
 
   async function fetchDonors() {
     setLoading(true);
-    const { data } = await supabase.from("donors").select("*").order("created_at", { ascending: false });
-    if (data) setDonors(data);
-    setLoading(false);
+    try {
+      const data = await donorsApi.list();
+      setDonors(data || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
@@ -54,51 +65,52 @@ export default function Donors() {
       alert("Name and phone are required.");
       return;
     }
-    const coords = CITY_COORDS[form.city] || CITY_COORDS.Lahore;
-    const { error } = await supabase.from("donors").insert({
-      name: form.name,
-      blood_group: form.blood_group,
-      phone: form.phone,
-      city: form.city,
-      latitude: coords.lat,
-      longitude: coords.lng,
-      last_donation_date: form.last_donation_date || null,
-    });
-    if (error) {
-      alert(error.message);
-      return;
+    try {
+      await donorsApi.create({
+        name: form.name,
+        email: form.email,
+        blood_group: form.blood_group,
+        phone: form.phone,
+        city: form.city,
+        last_donation_date: form.last_donation_date || null,
+      });
+      setForm({ name: "", email: "", blood_group: "O+", phone: "", city: "Lahore", last_donation_date: "" });
+      setShowAdd(false);
+      fetchDonors();
+    } catch (err) {
+      alert(err.message);
     }
-    setForm({ name: "", blood_group: "O+", phone: "", city: "Lahore", last_donation_date: "" });
-    setShowAdd(false);
-    fetchDonors();
   };
 
   const recordDonation = async (donor) => {
     const hospital = prompt(`Record blood donation for ${donor.name}.\nEnter Hospital Name:`, "Jinnah Hospital");
     if (!hospital) return;
-    const today = new Date().toISOString().slice(0, 10);
+    try {
+      await donorsApi.donate(donor.id, { hospital_name: hospital });
+      fetchDonors();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
 
-    await supabase.from("donation_history").insert({
-      donor_id: donor.id,
-      hospital_name: hospital,
-      blood_group: donor.blood_group,
-      units: 1,
-      donated_at: today,
-      notes: "Recorded via Lifeline Portal",
-    });
-
-    await supabase.from("donors").update({ last_donation_date: today }).eq("id", donor.id);
-    fetchDonors();
+  const deleteDonor = async (donor) => {
+    if (!confirm(`Delete donor ${donor.name}?`)) return;
+    try {
+      await donorsApi.remove(donor.id);
+      fetchDonors();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const openHistory = async (donor) => {
     setHistoryModal(donor);
-    const { data } = await supabase
-      .from("donation_history")
-      .select("*")
-      .eq("donor_id", donor.id)
-      .order("donated_at", { ascending: false });
-    setHistoryRows(data || []);
+    try {
+      const data = await donorsApi.history(donor.id);
+      setHistoryRows(data || []);
+    } catch {
+      setHistoryRows([]);
+    }
   };
 
   const filtered = donors.filter((d) => {
@@ -116,25 +128,36 @@ export default function Donors() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <div className="text-xs font-semibold uppercase tracking-wider text-crimson">People & Eligibility</div>
-          <h1 className="text-2xl font-bold text-slate-900 mt-0.5">Registered Donors</h1>
+          <h1 className="text-2xl font-bold text-slate-900 mt-0.5">
+            {role === "donor" ? "My Donor Profile" : "Registered Donors"}
+          </h1>
           <p className="text-sm text-slate-500">Automatic 90-day donation eligibility check & history tracking.</p>
         </div>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="inline-flex items-center gap-2 bg-crimson hover:bg-crimson-dark text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer self-start"
-        >
-          <UserPlus className="w-4 h-4" /> {showAdd ? "Close Form" : "Register Donor"}
-        </button>
+        {canManage && (
+          <button
+            onClick={() => setShowAdd(!showAdd)}
+            className="inline-flex items-center gap-2 bg-crimson hover:bg-crimson-dark text-white text-xs font-semibold px-4 py-2.5 rounded-xl cursor-pointer self-start"
+          >
+            <UserPlus className="w-4 h-4" /> {showAdd ? "Close Form" : "Register Donor"}
+          </button>
+        )}
       </div>
 
-      {showAdd && (
+      {showAdd && canManage && (
         <form onSubmit={addDonor} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-3">
           <h2 className="text-sm font-semibold text-slate-800">Add New Donor</h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
             <input
               placeholder="Full Name"
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
+              className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
+            />
+            <input
+              type="email"
+              placeholder="Email (for alerts)"
+              value={form.email}
+              onChange={(e) => setForm({ ...form, email: e.target.value })}
               className="px-3 py-2 rounded-xl border border-slate-300 text-sm"
             />
             <select
@@ -208,6 +231,8 @@ export default function Donors() {
             <tbody className="divide-y divide-slate-100">
               {loading ? (
                 <tr><td colSpan="6" className="px-5 py-8 text-center text-slate-400">Loading donors...</td></tr>
+              ) : filtered.length === 0 ? (
+                <tr><td colSpan="6" className="px-5 py-8 text-center text-slate-400">No donors found.</td></tr>
               ) : filtered.map((d) => {
                 const { eligible, daysLeft } = getEligibility(d.last_donation_date);
                 return (
@@ -216,6 +241,7 @@ export default function Donors() {
                     <td className="px-5 py-3.5"><BloodGroupBadge group={d.blood_group} /></td>
                     <td className="px-5 py-3.5 text-xs text-slate-600 space-y-0.5">
                       <div className="flex items-center gap-1"><Phone className="w-3 h-3 text-slate-400" /> {d.phone}</div>
+                      {d.email && <div className="flex items-center gap-1"><Mail className="w-3 h-3 text-slate-400" /> {d.email}</div>}
                       <div className="flex items-center gap-1"><MapPin className="w-3 h-3 text-crimson" /> {d.city}</div>
                     </td>
                     <td className="px-5 py-3.5 text-slate-600">{d.last_donation_date || "Never donated"}</td>
@@ -229,19 +255,29 @@ export default function Donors() {
                       </span>
                     </td>
                     <td className="px-5 py-3.5 text-right space-x-2 whitespace-nowrap">
-                      <button
-                        disabled={!eligible}
-                        onClick={() => recordDonation(d)}
-                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-crimson-soft text-crimson hover:bg-crimson hover:text-white disabled:opacity-40 cursor-pointer transition-colors"
-                      >
-                        <Droplet className="w-3.5 h-3.5" /> Donate
-                      </button>
+                      {canManage && (
+                        <button
+                          disabled={!eligible}
+                          onClick={() => recordDonation(d)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-crimson-soft text-crimson hover:bg-crimson hover:text-white disabled:opacity-40 cursor-pointer transition-colors"
+                        >
+                          <Droplet className="w-3.5 h-3.5" /> Donate
+                        </button>
+                      )}
                       <button
                         onClick={() => openHistory(d)}
                         className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium bg-slate-100 text-slate-700 hover:bg-slate-200 cursor-pointer"
                       >
                         <History className="w-3.5 h-3.5" /> History
                       </button>
+                      {canManage && (
+                        <button
+                          onClick={() => deleteDonor(d)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-400 hover:text-crimson hover:bg-crimson-soft cursor-pointer"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 );

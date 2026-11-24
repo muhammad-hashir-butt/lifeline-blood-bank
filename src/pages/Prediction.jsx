@@ -1,11 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { TrendingUp, AlertTriangle, CheckCircle2, Plus } from "lucide-react";
-import { supabase } from "../lib/supabase";
+import { predictionApi } from "../lib/api";
+import { useAuth } from "../context/AuthContext";
 import BloodGroupBadge from "../components/BloodGroupBadge";
 
 const BLOOD_GROUPS = ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-"];
 
 export default function Prediction() {
+  const { profile } = useAuth();
+  const canAdd = ["admin", "hospital", "ngo"].includes(profile?.role || "");
+
   const [demandRows, setDemandRows] = useState([]);
   const [inventory, setInventory] = useState([]);
   const [requests, setRequests] = useState([]);
@@ -14,22 +18,22 @@ export default function Prediction() {
 
   async function loadPredictionData() {
     setLoading(true);
-    const [demRes, invRes, reqRes] = await Promise.all([
-      supabase.from("monthly_demand").select("*").order("month_order", { ascending: true }),
-      supabase.from("inventory").select("*"),
-      supabase.from("requests").select("*").eq("status", "pending"),
-    ]);
-    if (demRes.data) setDemandRows(demRes.data);
-    if (invRes.data) setInventory(invRes.data);
-    if (reqRes.data) setRequests(reqRes.data);
-    setLoading(false);
+    try {
+      const data = await predictionApi.get();
+      setDemandRows(data.demandRows || []);
+      setInventory(data.inventory || []);
+      setRequests(data.requests || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
   }
 
   useEffect(() => {
     loadPredictionData();
   }, []);
 
-  // Weighted Moving Average Forecast for next month
   const last3 = demandRows.slice(-3);
   const nextMonthForecast =
     last3.length === 3
@@ -42,7 +46,6 @@ export default function Prediction() {
     nextMonthForecast
   );
 
-  // Per-blood-group Shortage Risk Analysis
   const riskReport = BLOOD_GROUPS.map((group) => {
     const stockUnits = inventory
       .filter((i) => i.blood_group === group)
@@ -68,14 +71,17 @@ export default function Prediction() {
   const addMonthRecord = async (e) => {
     e.preventDefault();
     if (!newMonth.month_label || !newMonth.actual_units) return;
-    await supabase.from("monthly_demand").insert({
-      month_label: newMonth.month_label,
-      month_order: demandRows.length + 1,
-      actual_units: Number(newMonth.actual_units),
-      predicted_units: nextMonthForecast,
-    });
-    setNewMonth({ month_label: "", actual_units: "" });
-    loadPredictionData();
+    try {
+      await predictionApi.addMonth({
+        month_label: newMonth.month_label,
+        actual_units: Number(newMonth.actual_units),
+        predicted_units: nextMonthForecast,
+      });
+      setNewMonth({ month_label: "", actual_units: "" });
+      loadPredictionData();
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   return (
@@ -113,6 +119,10 @@ export default function Prediction() {
 
         {loading ? (
           <div className="h-56 flex items-center justify-center text-sm text-slate-400">Loading forecast chart...</div>
+        ) : demandRows.length === 0 ? (
+          <div className="h-56 flex items-center justify-center text-sm text-slate-400">
+            No monthly demand data yet. Log usage below to start forecasting.
+          </div>
         ) : (
           <div className="flex items-end gap-4 h-56 pt-4 border-b border-slate-200 px-2 overflow-x-auto">
             {demandRows.map((item) => (
@@ -145,26 +155,28 @@ export default function Prediction() {
           </div>
         )}
 
-        <form onSubmit={addMonthRecord} className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-slate-500 mr-1">Log Monthly Usage:</span>
-          <input
-            placeholder="Month (e.g. Dec)"
-            value={newMonth.month_label}
-            onChange={(e) => setNewMonth({ ...newMonth, month_label: e.target.value })}
-            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs w-32"
-          />
-          <input
-            type="number"
-            min="1"
-            placeholder="Actual Units"
-            value={newMonth.actual_units}
-            onChange={(e) => setNewMonth({ ...newMonth, actual_units: e.target.value })}
-            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs w-32"
-          />
-          <button type="submit" className="inline-flex items-center gap-1 bg-slate-900 text-white text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">
-            <Plus className="w-3.5 h-3.5" /> Add Month
-          </button>
-        </form>
+        {canAdd && (
+          <form onSubmit={addMonthRecord} className="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center gap-2">
+            <span className="text-xs font-medium text-slate-500 mr-1">Log Monthly Usage:</span>
+            <input
+              placeholder="Month (e.g. Dec)"
+              value={newMonth.month_label}
+              onChange={(e) => setNewMonth({ ...newMonth, month_label: e.target.value })}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs w-32"
+            />
+            <input
+              type="number"
+              min="1"
+              placeholder="Actual Units"
+              value={newMonth.actual_units}
+              onChange={(e) => setNewMonth({ ...newMonth, actual_units: e.target.value })}
+              className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs w-32"
+            />
+            <button type="submit" className="inline-flex items-center gap-1 bg-slate-900 text-white text-xs font-semibold px-3 py-1.5 rounded-lg cursor-pointer">
+              <Plus className="w-3.5 h-3.5" /> Add Month
+            </button>
+          </form>
+        )}
       </div>
 
       <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
